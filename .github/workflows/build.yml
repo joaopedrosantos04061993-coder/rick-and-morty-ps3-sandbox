@@ -47,22 +47,22 @@ jobs:
           include $(PSL1GHT)/ppu_rules
           .RECIPEPREFIX := >
 
-          TARGET    := portallab
-          BUILD     := build
-          TITLE     := Portal Lab
-          APPID     := PLAB00001
-          CONTENTID := UP0001-$(APPID)_00-0000000000000000
+          TARGET     := portallab
+          BUILD      := build
+          TITLE      := Portal Lab
+          APPID      := PLAB00001
+          CONTENTID  := UP0001-$(APPID)_00-0000000000000000
 
-          PORTLIBS  ?= $(PS3DEV)/portlibs/ppu
-          ELF2SELF  ?= $(PS3DEV)/bin/sprxlinker
+          PORTLIBS   ?= $(PS3DEV)/portlibs/ppu
+          ELF2SELF   ?= $(PS3DEV)/bin/sprxlinker
           SELF_NPDRM ?= $(PS3DEV)/bin/make_self_npdrm
-          SFO       ?= $(PS3DEV)/bin/sfo.py
-          PKG       ?= $(PS3DEV)/bin/pkg.py
+          SFO        ?= $(PS3DEV)/bin/sfo.py
+          PKG        ?= $(PS3DEV)/bin/pkg.py
 
-          CFLAGS    := -O2 -Wall -mcpu=cell $(MACHDEP) -I$(PORTLIBS)/include
-          CXXFLAGS  := $(CFLAGS) -fno-exceptions -fno-rtti
-          LDFLAGS   := $(MACHDEP) -L$(PORTLIBS)/lib
-          LIBS      := -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
+          CFLAGS     := -O2 -Wall -mcpu=cell $(MACHDEP) -I$(PORTLIBS)/include
+          CXXFLAGS   := $(CFLAGS) -fno-exceptions -fno-rtti
+          LDFLAGS    := $(MACHDEP) -L$(PORTLIBS)/lib
+          LIBS       := -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
 
           OBJS := $(patsubst source/%.cpp,$(BUILD)/%.o,$(wildcard source/*.cpp))
 
@@ -98,7 +98,6 @@ jobs:
           #include <stdlib.h>
           #include <unistd.h>
           #include <malloc.h>
-          #include <sys/process.h>
           #include <sysutil/sysutil.h>
           #include <sysutil/video.h>
           #include <io/pad.h>
