@@ -1,0 +1,223 @@
+name: Portal Lab PS3
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Valida que o jogo web do zip continua compilando (não bloqueia o PS3)
+  web:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Extrair e compilar o jogo web
+        run: |
+          unzip -q portal-lab-*.zip -d game
+          cd game/*/
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portal-lab-web
+          path: game/*/dist
+
+  # Gera o .pkg do PS3
+  ps3:
+    runs-on: ubuntu-latest
+    container: ps3dev/ps3dev:latest
+    env:
+      PS3DEV: /usr/local/ps3dev
+      PSL1GHT: /usr/local/ps3dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar ferramentas e extrair o zip
+        run: |
+          (command -v unzip && command -v convert) || (apt-get update && apt-get install -y unzip imagemagick) || true
+          unzip -q portal-lab-*.zip -d game
+
+      - name: Criar projeto PS3 (esqueleto)
+        run: |
+          mkdir -p ps3/source
+          FAV=$(ls game/*/assets/share/portal_lab_favicon.png)
+          if command -v convert >/dev/null; then
+            convert "$FAV" -resize 160x160 -background '#1b1838' -gravity center -extent 320x176 ps3/ICON0.PNG
+          else
+            cp "$FAV" ps3/ICON0.PNG
+          fi
+
+          cat > ps3/sfo.xml <<'EOF'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <paramsfo add_hidden="false">
+            <param key="ATTRIBUTE">0</param>
+            <param key="BOOTABLE">1</param>
+            <param key="CATEGORY">HG</param>
+            <param key="PARENTAL_LEVEL">1</param>
+            <param key="PS3_SYSTEM_VER">0003.0000</param>
+            <param key="RESOLUTION">63</param>
+            <param key="SOUND_FORMAT">1</param>
+            <param key="TITLE">Portal Lab</param>
+            <param key="TITLE_ID">PLAB00001</param>
+            <param key="VERSION">01.00</param>
+          </paramsfo>
+          EOF
+
+          cat > ps3/Makefile <<'EOF'
+          include $(PSL1GHT)/ppu_rules
+          .RECIPEPREFIX := >
+
+          TARGET    := portallab
+          BUILD     := build
+          TITLE     := Portal Lab
+          APPID     := PLAB00001
+          CONTENTID := UP0001-$(APPID)_00-0000000000000000
+
+          CFLAGS    := -O2 -Wall -mcpu=cell $(MACHDEP) -I$(PORTLIBS)/include
+          CXXFLAGS  := $(CFLAGS) -fno-exceptions -fno-rtti
+          LDFLAGS   := $(MACHDEP) -L$(PORTLIBS)/lib
+          LIBS      := -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
+
+          OBJS := $(patsubst source/%.cpp,$(BUILD)/%.o,$(wildcard source/*.cpp))
+
+          .PHONY: all pkg clean
+          all: $(TARGET).self
+
+          $(BUILD)/%.o: source/%.cpp
+          > @mkdir -p $(BUILD)
+          > $(CXX) $(CXXFLAGS) -c $< -o $@
+
+          $(TARGET).elf: $(OBJS)
+          > $(CXX) $(LDFLAGS) $(OBJS) $(LIBS) -o $@
+
+          pkg: $(TARGET).pkg
+          $(TARGET).pkg: $(TARGET).self
+          > @mkdir -p $(BUILD)/pkg/USRDIR
+          > @cp ICON0.PNG $(BUILD)/pkg/ICON0.PNG
+          > $(SELF_NPDRM) $(TARGET).self $(BUILD)/pkg/USRDIR/EBOOT.BIN $(CONTENTID)
+          > $(SFO) --title "$(TITLE)" --appid "$(APPID)" -f sfo.xml $(BUILD)/pkg/PARAM.SFO
+          > $(PKG) --contentid $(CONTENTID) $(BUILD)/pkg/ $@
+
+          clean:
+          > rm -rf $(BUILD) $(TARGET).elf $(TARGET).self $(TARGET).pkg
+          EOF
+
+          cat > ps3/source/main.cpp <<'EOF'
+          #include <stdio.h>
+          #include <string.h>
+          #include <stdint.h>
+          #include <stdlib.h>
+          #include <unistd.h>
+          #include <malloc.h>
+          #include <sys/process.h>
+          #include <sysutil/sysutil.h>
+          #include <sysutil/video.h>
+          #include <io/pad.h>
+          #include <rsx/rsx.h>
+
+          #define CB_SIZE   0x100000
+          #define HOST_SIZE (32 * 1024 * 1024)
+
+          static gcmContextData *g_ctx = NULL;
+          static bool g_running = true;
+          static uint32_t g_w = 0, g_h = 0;
+          struct Buffer { uint32_t *ptr; uint32_t offset; };
+          static Buffer g_buf[2];
+
+          static void sysEvent(uint64_t status, uint64_t, void *) {
+            if (status == SYSUTIL_EXIT_GAME) g_running = false;
+          }
+
+          static void initScreen() {
+            void *host = memalign(1024 * 1024, HOST_SIZE);
+            rsxInit(&g_ctx, CB_SIZE, HOST_SIZE, host);
+            videoState state;
+            videoResolution res;
+            videoGetState(0, 0, &state);
+            videoGetResolution(state.displayMode.resolution, &res);
+            g_w = res.width;
+            g_h = res.height;
+            videoConfiguration cfg;
+            memset(&cfg, 0, sizeof(cfg));
+            cfg.resolution = state.displayMode.resolution;
+            cfg.format = VIDEO_BUFFER_FORMAT_XRGB;
+            cfg.pitch = g_w * sizeof(uint32_t);
+            cfg.aspect = state.displayMode.aspect;
+            videoConfigure(0, &cfg, NULL, 0);
+            videoGetState(0, 0, &state);
+            gcmSetFlipMode(GCM_FLIP_VSYNC);
+            for (int i = 0; i < 2; i++) {
+              g_buf[i].ptr = (uint32_t *)rsxMemalign(16, g_w * g_h * sizeof(uint32_t));
+              rsxAddressToOffset(g_buf[i].ptr, &g_buf[i].offset);
+              gcmSetDisplayBuffer(i, g_buf[i].offset, g_w * sizeof(uint32_t), g_w, g_h);
+            }
+            gcmResetFlipStatus();
+          }
+
+          static void flip(int idx) {
+            gcmSetFlip(g_ctx, idx);
+            rsxFlushBuffer(g_ctx);
+            gcmSetWaitFlip(g_ctx);
+          }
+
+          static void waitFlip() {
+            while (gcmGetFlipStatus() != 0) usleep(200);
+            gcmResetFlipStatus();
+          }
+
+          int main(int, char **) {
+            sysUtilRegisterCallback(0, sysEvent, NULL);
+            ioPadInit(7);
+            initScreen();
+            int cur = 0;
+            uint32_t t = 0;
+            bool first = true;
+            while (g_running) {
+              sysUtilCheckCallback();
+              padInfo info;
+              padData pad;
+              ioPadGetInfo(&info);
+              for (int p = 0; p < MAX_PADS; p++) {
+                if (info.status[p]) {
+                  ioPadGetData(p, &pad);
+                  if (pad.BTN_START) g_running = false;
+                }
+              }
+              if (!first) waitFlip();
+              first = false;
+              uint32_t ph = t % 120;
+              uint32_t v = 40 + (ph < 60 ? ph : 119 - ph);
+              uint32_t color = (v << 16) | ((v / 2) << 8) | (v + 40);
+              uint32_t *px = g_buf[cur].ptr;
+              for (uint32_t i = 0; i < g_w * g_h; i++) px[i] = color;
+              flip(cur);
+              cur ^= 1;
+              t++;
+            }
+            gcmSetWaitFlip(g_ctx);
+            rsxFinish(g_ctx, 1);
+            ioPadEnd();
+            sysUtilUnregisterCallback(0);
+            return 0;
+          }
+          EOF
+
+      - name: Compilar e gerar .pkg
+        run: |
+          export PATH="$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin:$PS3DEV/spu/bin"
+          cd ps3
+          make pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portallab-ps3
+          path: |
+            ps3/portallab.pkg
+            ps3/portallab.self
