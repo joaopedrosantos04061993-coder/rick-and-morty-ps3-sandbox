@@ -59,9 +59,9 @@ jobs:
           SFO        ?= $(PS3DEV)/bin/sfo.py
           PKG        ?= $(PS3DEV)/bin/pkg.py
 
-          CFLAGS     := -O2 -Wall -mcpu=cell $(MACHDEP) -I$(PORTLIBS)/include
+          CFLAGS     := -O2 -Wall -mcpu=cell $(MACHDEP) -I$(PSL1GHT)/ppu/include -I$(PORTLIBS)/include
           CXXFLAGS   := $(CFLAGS) -fno-exceptions -fno-rtti
-          LDFLAGS    := $(MACHDEP) -L$(PORTLIBS)/lib
+          LDFLAGS    := $(MACHDEP) -L$(PSL1GHT)/ppu/lib -L$(PORTLIBS)/lib
           LIBS       := -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
 
           OBJS := $(patsubst source/%.cpp,$(BUILD)/%.o,$(wildcard source/*.cpp))
@@ -197,7 +197,8 @@ jobs:
         run: |
           docker pull ghcr.io/altps3/ps3dev:latest
           docker run --rm -v "$PWD/ps3:/build" -w /build ghcr.io/altps3/ps3dev:latest sh -c '
-            : "${PS3DEV:=/usr/local/ps3dev}"; : "${PSL1GHT:=$PS3DEV}"
+            : "${PS3DEV:=/usr/local/ps3dev}"; : "${PSL1GHT:=$PS3DEV/PSL1GHT}"
+            [ -d "$PSL1GHT" ] || PSL1GHT="$PS3DEV"
             export PS3DEV PSL1GHT
             export PATH="$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin:$PS3DEV/spu/bin"
             make pkg
