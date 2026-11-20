@@ -55,7 +55,7 @@ jobs:
 
           PORTLIBS   ?= $(PS3DEV)/portlibs/ppu
           ELF2SELF   ?= $(PS3DEV)/bin/sprxlinker
-          SELF_NPDRM ?= $(PS3DEV)/bin/make_self_npdrm
+          SELF_NPDRM ?= make_self_npdrm
           SFO        ?= $(PS3DEV)/bin/sfo.py
           PKG        ?= $(PS3DEV)/bin/pkg.py
 
@@ -83,7 +83,7 @@ jobs:
           $(TARGET).pkg: $(TARGET).self
           > @mkdir -p $(BUILD)/pkg/USRDIR
           > @[ -f ICON0.PNG ] && cp ICON0.PNG $(BUILD)/pkg/ICON0.PNG || true
-          > $(SELF_NPDRM) $(TARGET).self $(BUILD)/pkg/USRDIR/EBOOT.BIN $(CONTENTID)
+          > $(SELF_NPDRM) $(TARGET).elf $(BUILD)/pkg/USRDIR/EBOOT.BIN $(CONTENTID) || cp $(TARGET).self $(BUILD)/pkg/USRDIR/EBOOT.BIN
           > $(SFO) --title "$(TITLE)" --appid "$(APPID)" -f sfo.xml $(BUILD)/pkg/PARAM.SFO
           > $(PKG) --contentid $(CONTENTID) $(BUILD)/pkg/ $@
 
