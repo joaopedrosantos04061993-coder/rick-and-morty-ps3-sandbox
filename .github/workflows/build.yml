@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Gera o .pkg do PS3
   ps3:
     runs-on: ubuntu-latest
     steps:
@@ -15,15 +14,16 @@ jobs:
       - name: Preparar ferramentas e extrair o zip
         run: |
           sudo apt-get update && sudo apt-get install -y unzip imagemagick || true
-          unzip -q portal-lab-*.zip -d game
+          mkdir -p game
+          unzip -q portal-lab-github.zip -d game
 
       - name: Criar projeto PS3 (esqueleto)
         run: |
           mkdir -p ps3/source
-          FAV=$(ls game/*/assets/share/portal_lab_favicon.png)
-          if command -v convert >/dev/null; then
+          FAV=$(find game -name "portal_lab_favicon.png" | head -n 1)
+          if [ -n "$FAV" ] && command -v convert >/dev/null 2>&1; then
             convert "$FAV" -resize 160x160 -background '#1b1838' -gravity center -extent 320x176 ps3/ICON0.PNG
-          else
+          elif [ -n "$FAV" ]; then
             cp "$FAV" ps3/ICON0.PNG
           fi
 
@@ -53,6 +53,12 @@ jobs:
           APPID     := PLAB00001
           CONTENTID := UP0001-$(APPID)_00-0000000000000000
 
+          PORTLIBS  ?= $(PS3DEV)/portlibs/ppu
+          ELF2SELF  ?= $(PS3DEV)/bin/sprxlinker
+          SELF_NPDRM ?= $(PS3DEV)/bin/make_self_npdrm
+          SFO       ?= $(PS3DEV)/bin/sfo.py
+          PKG       ?= $(PS3DEV)/bin/pkg.py
+
           CFLAGS    := -O2 -Wall -mcpu=cell $(MACHDEP) -I$(PORTLIBS)/include
           CXXFLAGS  := $(CFLAGS) -fno-exceptions -fno-rtti
           LDFLAGS   := $(MACHDEP) -L$(PORTLIBS)/lib
@@ -70,10 +76,13 @@ jobs:
           $(TARGET).elf: $(OBJS)
           > $(CXX) $(LDFLAGS) $(OBJS) $(LIBS) -o $@
 
+          $(TARGET).self: $(TARGET).elf
+          > $(ELF2SELF) $< $@
+
           pkg: $(TARGET).pkg
           $(TARGET).pkg: $(TARGET).self
           > @mkdir -p $(BUILD)/pkg/USRDIR
-          > @cp ICON0.PNG $(BUILD)/pkg/ICON0.PNG
+          > @[ -f ICON0.PNG ] && cp ICON0.PNG $(BUILD)/pkg/ICON0.PNG || true
           > $(SELF_NPDRM) $(TARGET).self $(BUILD)/pkg/USRDIR/EBOOT.BIN $(CONTENTID)
           > $(SFO) --title "$(TITLE)" --appid "$(APPID)" -f sfo.xml $(BUILD)/pkg/PARAM.SFO
           > $(PKG) --contentid $(CONTENTID) $(BUILD)/pkg/ $@
@@ -167,7 +176,10 @@ jobs:
               first = false;
               uint32_t ph = t % 120;
               uint32_t v = 40 + (ph < 60 ? ph : 119 - ph);
-              uint32_t color = (v << 16) | ((v / 2) << 8) | (v + 40);
+              uint8_t r = v & 0xFF;
+              uint8_t g = (v / 2) & 0xFF;
+              uint8_t b = (v + 40) & 0xFF;
+              uint32_t color = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
               uint32_t *px = g_buf[cur].ptr;
               for (uint32_t i = 0; i < g_w * g_h; i++) px[i] = color;
               flip(cur);
@@ -189,8 +201,6 @@ jobs:
             : "${PS3DEV:=/usr/local/ps3dev}"; : "${PSL1GHT:=$PS3DEV}"
             export PS3DEV PSL1GHT
             export PATH="$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin:$PS3DEV/spu/bin"
-            echo "PS3DEV=$PS3DEV PSL1GHT=$PSL1GHT"
-            ls "$PSL1GHT" || true
             make pkg
           '
           ls -la ps3
