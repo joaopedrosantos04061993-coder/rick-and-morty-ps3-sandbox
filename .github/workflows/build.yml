@@ -1,4 +1,4 @@
-name: Portal Lab PS3
+name: Portal Lab PS3 (somente PS3)
 
 on:
   push:
@@ -6,42 +6,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Valida que o jogo web do zip continua compilando (não bloqueia o PS3)
-  web:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Extrair e compilar o jogo web
-        run: |
-          unzip -q portal-lab-*.zip -d game
-          cd game/*/
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm typecheck
-          pnpm test
-          pnpm build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: portal-lab-web
-          path: game/*/dist
-
   # Gera o .pkg do PS3
   ps3:
     runs-on: ubuntu-latest
-    container: ps3dev/ps3dev:latest
-    env:
-      PS3DEV: /usr/local/ps3dev
-      PSL1GHT: /usr/local/ps3dev
     steps:
       - uses: actions/checkout@v4
 
       - name: Preparar ferramentas e extrair o zip
         run: |
-          (command -v unzip && command -v convert) || (apt-get update && apt-get install -y unzip imagemagick) || true
+          sudo apt-get update && sudo apt-get install -y unzip imagemagick || true
           unzip -q portal-lab-*.zip -d game
 
       - name: Criar projeto PS3 (esqueleto)
@@ -209,11 +182,18 @@ jobs:
           }
           EOF
 
-      - name: Compilar e gerar .pkg
+      - name: Compilar e gerar .pkg (dentro do container ps3dev)
         run: |
-          export PATH="$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin:$PS3DEV/spu/bin"
-          cd ps3
-          make pkg
+          docker pull ghcr.io/altps3/ps3dev:latest
+          docker run --rm -v "$PWD/ps3:/build" -w /build ghcr.io/altps3/ps3dev:latest sh -c '
+            : "${PS3DEV:=/usr/local/ps3dev}"; : "${PSL1GHT:=$PS3DEV}"
+            export PS3DEV PSL1GHT
+            export PATH="$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin:$PS3DEV/spu/bin"
+            echo "PS3DEV=$PS3DEV PSL1GHT=$PSL1GHT"
+            ls "$PSL1GHT" || true
+            make pkg
+          '
+          ls -la ps3
 
       - uses: actions/upload-artifact@v4
         with:
